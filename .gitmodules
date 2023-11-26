@@ -1,0 +1,6 @@
+[submodule "Controller/components/ESP32_VL53L0X"]
+	path = Controller/components/ESP32_VL53L0X
+	url = https://github.com/kerikun11/ESP32_VL53L0X.git
+[submodule "Controller/components/esp32-vl53l0x"]
+	path = Controller/components/esp32-vl53l0x
+	url = https://github.com/kylehendricks/esp32-vl53l0x.git
