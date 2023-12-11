@@ -1,6 +1,6 @@
 <h1 align="center"> Floating Ball Control </h1>
 
-## Descrição do Projeto
+## Project Description
 
 ### Overview
 
