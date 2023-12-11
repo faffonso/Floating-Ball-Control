@@ -1,157 +1,134 @@
+/* INCLUDES */
+
+// Components
 #include "VL53L0X.h"
 #include "ultrasonic.h"
 #include "pid_ctrl.h"
 
+// Libs
 #include "actuators.h"
+#include "MovingAverageFilter.hpp"
 
+// Esp-idf drivers
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 
-#define DEBUG 1
-#define DELAY 500
+/* MACROS */
 
-#define MAX_DISTANCE_CM 500 // 5m max
+#define DEBUG 1        // Verbose print type
 
-#define DEBUG_ACTUATOR      0
-#define DEBUG_ULTRASSONIC   0
-#define DEBUG_VL53L0X       0
-#define DEBUG_CONTROL       0
+// VL53L0X (Laser Sensor)
+#define OFFSET 420 // Measure offset in mm
+#define I2C_PORT I2C_NUM_0
+#define PIN_SDA GPIO_NUM_21
+#define PIN_SCL GPIO_NUM_22
 
+// Ultrassonic
+#define MAX_DISTANCE_CM 35 
+#define TRIGGER_GPIO GPIO_NUM_2
+#define ECHO_GPIO GPIO_NUM_4
+
+// PID
+#define DELAY 10       
+
+#define Kp 11.1
+#define Ki 1.11
+#define Kd 111
+
+#define MIN_OUT         0
+#define MAX_OUT         8192
+#define MAX_INTEGRAL    8192/Ki
+
+/* GLOBAL VARIABLES & FUNCTIONS */
+void init();
+const char* TAG_M = "main";
+
+VL53L0X sensor(I2C_PORT);
+ultrasonic_sensor_t ultrassonic;
+pid_ctrl_block_handle_t pid;
+MovingAverageFilter movingAvgFilter(22); // Window size
 
 
 extern "C" void app_main() {
+    // Init all modules
+    init();
 
-    #if DEBUG_ACTUATOR
+    // Local variables
+    float   setpoint,           // Control setpoint
+            ultra_result,       // Ultrassonic measure
+            error,              // State error
+            u;                  // Action control for PWM
+    
+    uint16_t laser_result = 0;  // Laser measure
+
+    // Main loop
+    while(1)
+    {
+        // Getting ultrassonig measure (setpoint)
+        esp_err_t res =  ultrasonic_measure(&ultrassonic, MAX_DISTANCE_CM, &ultra_result);
         
-        init_gpio();
-        init_pwm();
-        uint16_t u = 800;
+        // Transform measure to mm and apply a moving avage filter
+        ultra_result *= 1000;
+        setpoint = (ultra_result < 335) ? movingAvgFilter.addData(ultra_result) : movingAvgFilter.getFilteredValue();
+        
+        // Getting laser measure (feedback value)
+        bool read = sensor.read(&laser_result);
 
-        //Inf Loop
-        while(1)
+        // Calculate the error and apply the PID control
+        error = setpoint - (OFFSET - laser_result);
+        pid_compute(pid, error, &u);
+        update_motor(u, DEBUG);
+        
+        // Print system informations
+        if (DEBUG == 1)
         {
-            // Ascendent motor speed
-            for (int i=0; i<10; i++)
-            {
-                update_motor(u * i, DEBUG);
-                vTaskDelay( DELAY / portTICK_PERIOD_MS);
-            }
+            ESP_LOGI(TAG_M, "Result: %f [mm]", ultra_result);
+            ESP_LOGI(TAG_M, "Setpoint: %f [mm]", setpoint);
+            ESP_LOGI(TAG_M, "Range: %d [mm]", OFFSET - (int)laser_result);
+            ESP_LOGI(TAG_M, "Error: %f [mm]", error);
         }
 
-    #endif
+        vTaskDelay(pdMS_TO_TICKS(DELAY));
+    }
+}
 
-    #if DEBUG_ULTRASSONIC
-        #define TRIGGER_GPIO GPIO_NUM_17
-        #define ECHO_GPIO GPIO_NUM_16
+// Init all system modules (sensors, actuators and controllers)
+void init()
+{
 
+    // Init H-Bridge
+    init_gpio();
+    init_pwm();
 
-        ultrasonic_sensor_t sensor = {
-            .trigger_pin = TRIGGER_GPIO,
-            .echo_pin = ECHO_GPIO
-        };
+    // Init Laser Sensor
+    sensor.i2cMasterInit(PIN_SDA, PIN_SCL);
 
-        ultrasonic_init(&sensor);
+    if (!sensor.init()) {
+        ESP_LOGE(TAG_M, "Failed to initialize VL53L0X");
+        vTaskDelay(portMAX_DELAY);
+    }
 
-        while (true)
-        {
-            float distance;
-            esp_err_t res = ultrasonic_measure(&sensor, MAX_DISTANCE_CM, &distance);
-            if (res != ESP_OK)
-            {
-                printf("Error %d: ", res);
-                switch (res)
-                {
-                    case ESP_ERR_ULTRASONIC_PING:
-                        printf("Cannot ping (device is in invalid state)\n");
-                        break;
-                    case ESP_ERR_ULTRASONIC_PING_TIMEOUT:
-                        printf("Ping timeout (no device found)\n");
-                        break;
-                    case ESP_ERR_ULTRASONIC_ECHO_TIMEOUT:
-                        printf("Echo timeout (i.e. distance too big)\n");
-                        break;
-                    default:
-                        printf("%s\n", esp_err_to_name(res));
-                }
-            }
-            else
-                printf("Distance: %0.04f m\n", distance);
+    // Init Ultrassonic Sensor
+    ultrassonic = {
+        .trigger_pin = TRIGGER_GPIO,
+        .echo_pin = ECHO_GPIO
+    };
 
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
-    #endif
+    ultrasonic_init(&ultrassonic);
 
-    #if DEBUG_VL53L0X
-        #define I2C_PORT I2C_NUM_0
-        #define PIN_SDA GPIO_NUM_21
-        #define PIN_SCL GPIO_NUM_22
+    // Init PID
+    pid_ctrl_parameter_t pid_param = {
+        .kp = Kp,
+        .ki = Ki,
+        .kd = Kd,
+        .max_output = MAX_OUT,
+        .min_output = MIN_OUT,
+        .max_integral = MAX_INTEGRAL,
+        .min_integral = 0,
+        .cal_type = PID_CAL_TYPE_POSITIONAL
+    };
+    pid_ctrl_config_t pid_config;
+    pid_config.init_param = pid_param;
 
-        VL53L0X sensor(I2C_PORT);
-        sensor.i2cMasterInit(PIN_SDA, PIN_SCL);
-
-        if (!sensor.init()) {
-            ESP_LOGE(TAG, "Failed to initialize VL53L0X");
-            vTaskDelay(portMAX_DELAY);
-        }
-
-        // Measurement
-        while (1) {
-            //Read value
-            uint16_t result_mm = 0;
-            
-            //Start time
-            TickType_t tick_start = xTaskGetTickCount();
-
-            //Reading sensor
-            bool read = sensor.read(&result_mm);
-            
-            //Calculate time spend 
-            TickType_t tick_end = xTaskGetTickCount();
-            int took_ms = ((int)tick_end - tick_start) / portTICK_PERIOD_MS;
-            
-            //Print measure
-            if (read)
-                ESP_LOGI(TAG, "Range: %d [mm] took %d [ms]", (int)result_mm, took_ms);
-            else
-                ESP_LOGE(TAG, "Failed to measure :(");
-        }
-
-
-    #endif
-
-    #if DEBUG_CONTROL
-        #define Kp 1
-        #define Ki 1
-        #define Kd 1
-
-        #define MAX_OUT         100
-        #define MAX_INTEGRAL    1000
-
-        pid_ctrl_block_handle_t pid;
-        pid_ctrl_parameter_t pid_param = {
-            .kp = Kp,
-            .ki = Ki,
-            .kd = Kd,
-            .max_output = MAX_OUT,
-            .min_output = 0,
-            .max_integral = MAX_INTEGRAL,
-            .min_integral = 0,
-            .cal_type = PID_CAL_TYPE_POSITIONAL
-        };
-        pid_ctrl_config_t pid_config;
-        pid_config.init_param = pid_param;
-
-        pid_new_control_block(&pid_config, &pid);
-
-        float error, u;
-        while(1)
-        {
-            error = 10.5;
-            pid_compute(pid, error, &u);
-            ESP_LOGI(TAG, "Action control: %f.2", u);
-
-            error = 10.5 - u;
-            vTaskDelay(pdMS_TO_TICKS(DELAY));
-        }
-    #endif
+    pid_new_control_block(&pid_config, &pid);
 }

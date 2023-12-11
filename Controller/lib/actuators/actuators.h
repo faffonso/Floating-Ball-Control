@@ -17,6 +17,7 @@
 
 /* Bib */
 #include "esp_err.h"
+#include "esp_log.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 
@@ -30,16 +31,16 @@
 #define HIGH    1
 
 // GPIOs of H-Bridge
-#define H_BRIDGE_INPUT_1    GPIO_NUM_22
-#define H_BRIDGE_INPUT_2    GPIO_NUM_23
+#define H_BRIDGE_INPUT_1    GPIO_NUM_18
+#define H_BRIDGE_INPUT_2    GPIO_NUM_19
 
 // PWM Config 
 #define LEDC_TIMER              LEDC_TIMER_0
 #define LEDC_MODE               LEDC_LOW_SPEED_MODE
 #define LEDC_DUTY_RES           LEDC_TIMER_13_BIT   // Set duty resolution to 13 bits (MAX=8192)
-#define LEDC_FREQUENCY          (5000)              // Frequency of 4kHz
+#define LEDC_FREQUENCY          (4000)              // Frequency of 4kHz
 
-#define LEDC_OUTPUT             GPIO_NUM_13
+#define LEDC_OUTPUT             GPIO_NUM_32
 #define LEDC_CHANNEL            LEDC_CHANNEL_0
 
 

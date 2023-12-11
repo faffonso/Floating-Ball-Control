@@ -41,8 +41,8 @@ esp_err_t update_motor(int u, int debug)
     
     u = u > 0 ? u : -u;  //Abs of action control u
     
-    //if (debug == 1)
-        //ESP_LOGI(TAG, "Action control %d\n", u);
+    if (debug == 1)
+        ESP_LOGI(TAG, "Action control %d\n", u);
 
     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, u);
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
